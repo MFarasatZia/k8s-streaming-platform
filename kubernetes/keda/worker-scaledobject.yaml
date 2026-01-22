@@ -1,0 +1,72 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: youtube-stream-worker-scaledobject
+  namespace: dev
+  labels:
+    app: youtube-stream-worker
+spec:
+  # Target deployment to scale
+  scaleTargetRef:
+    name: youtube-stream-worker
+
+  # Scaling boundaries for workers
+  minReplicaCount: 1
+  maxReplicaCount: 3
+
+  # Longer cooldown for workers (streams are long-running)
+  cooldownPeriod: 600          # Wait 10 min before scaling down
+  pollingInterval: 30          # Check metrics every 30 seconds
+
+  # Advanced scaling behavior (conservative for workers)
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleDown:
+          # Very conservative scale-down for workers
+          stabilizationWindowSeconds: 600
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 300
+
+  # Scaling triggers for workers
+  triggers:
+    # Trigger 1: Active Streams per Worker (Primary - from NEW worker metrics)
+    # Each worker can handle ~5 concurrent streams
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-server:9090
+        metricName: worker_active_streams
+        query: |
+          avg(worker_active_streams)
+        threshold: "5"  # Scale up when avg > 5 streams per worker
+        activationThreshold: "1"  # Activate when at least 1 stream
+
+    # Trigger 2: Total Active Streams (fallback to API metrics if worker metrics unavailable)
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-server:9090
+        metricName: total_active_streams
+        query: |
+          sum(worker_active_streams) or youtubr_api_streams_active_total
+        threshold: "5"  # Scale up when total streams > 5 per replica
+        activationThreshold: "1"
+
+    # Trigger 3: Worker CPU (FFmpeg is CPU intensive)
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"  # Scale at 60% CPU for workers
+
+    # Trigger 4: Worker Memory
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: "70"

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: youtube-frontend
+  namespace: dev
+  labels:
+    app: youtube-frontend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: youtube-frontend
+  template:
+    metadata:
+      labels:
+        app: youtube-frontend
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry
+      containers:
+        - name: youtube-frontend
+          image: 794272871374.dkr.ecr.eu-north-1.amazonaws.com/automation-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"

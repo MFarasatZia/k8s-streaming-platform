@@ -1,0 +1,86 @@
+name: Build and Deploy Frontend
+
+on:
+  push:
+    branches:
+      - devops
+  workflow_dispatch:
+
+env:
+  # Vite build args (same as your Makefile defaults, but keep here for clarity/override)
+  VITE_API_URL: https://dev-api.semperstream.io
+  VITE_WORKERS_API_URL: https://dev-worker.semperstream.io
+  VITE_DISCORD_URL: https://discord.gg/6MCHZxFt
+  VITE_HOW_TO_GUIDE: https://discord.gg/6MCHZxFt
+  VITE_AFFILIATE_URL: https://semperstream.firstpromoter.com
+  VITE_LANDING_URL: https://home.semperstream.io
+  VITE_AMAZON_BASE_URL: https://dev-semper.s3.eu-north-1.amazonaws.com
+
+jobs:
+  build-and-push:
+    name: Build and Push Frontend Image
+    runs-on: ubuntu-latest
+    environment: Frontend Secrets
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.ECR_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      # This calls your Makefile:
+      # - make login-ecr
+      # - make build-front
+      # - make push-front
+      - name: Build and Push Frontend Image
+        run: make release-all
+        env:
+          # Override Makefile vars (optional but explicit)
+          AWS_REGION: ${{ vars.ECR_REGION }}
+
+          # Pass Vite args to Makefile (it already has defaults, but this ensures consistency)
+          VITE_API_URL: ${{ env.VITE_API_URL }}
+          VITE_WORKERS_API_URL: ${{ env.VITE_WORKERS_API_URL }}
+          VITE_DISCORD_URL: ${{ env.VITE_DISCORD_URL }}
+          VITE_HOW_TO_GUIDE: ${{ env.VITE_HOW_TO_GUIDE }}
+          VITE_AFFILIATE_URL: ${{ env.VITE_AFFILIATE_URL }}
+          VITE_LANDING_URL: ${{ env.VITE_LANDING_URL }}
+          VITE_AMAZON_BASE_URL: ${{ env.VITE_AMAZON_BASE_URL }}
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > kubeconfig.yaml
+          chmod 600 kubeconfig.yaml
+          echo "KUBECONFIG=$PWD/kubeconfig.yaml" >> $GITHUB_ENV
+
+      - name: Test cluster access
+        run: kubectl get nodes
+
+      - name: Deploy exact image (commit tag)
+        run: make deploy IMAGE_TAG=${GITHUB_SHA::7}
+        env:
+          K8S_NAMESPACE: dev
+          DEPLOYMENT_NAME: youtube-frontend
+          CONTAINER: youtube-frontend
+
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ Frontend Image pushed and deployment rolled out"
+          echo "✅ Deployed to namespace: dev"
+          echo "✅ Deployment: youtube-frontend (container: youtube-frontend)"
+          echo "Deployment completed successfully!"

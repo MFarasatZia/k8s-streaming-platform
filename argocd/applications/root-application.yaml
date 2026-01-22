@@ -1,0 +1,91 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: streaming-platform-root
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: root
+    app.kubernetes.io/part-of: streaming-platform
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: streaming-platform
+
+  # App-of-Apps pattern - this application manages other applications
+  source:
+    repoURL: https://github.com/yourusername/devops-k8s-streaming-platform.git
+    targetRevision: HEAD
+    path: argocd/applications
+
+    directory:
+      recurse: false
+      # Exclude itself to prevent infinite loop
+      exclude: "root-application.yaml"
+
+  # Destination - argocd namespace for Application resources
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  # Sync policy for root app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=false  # argocd namespace already exists
+      - ApplyOutOfSyncOnly=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+---
+# ApplicationSet for multi-environment deployments
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: streaming-platform-envs
+  namespace: argocd
+spec:
+  generators:
+    # Generate applications for each environment
+    - list:
+        elements:
+          - env: dev
+            namespace: dev
+            revision: develop
+          - env: staging
+            namespace: staging
+            revision: staging
+          - env: prod
+            namespace: production
+            revision: main
+
+  template:
+    metadata:
+      name: "streaming-platform-{{env}}"
+      namespace: argocd
+      labels:
+        environment: "{{env}}"
+    spec:
+      project: streaming-platform
+      source:
+        repoURL: https://github.com/yourusername/devops-k8s-streaming-platform.git
+        targetRevision: "{{revision}}"
+        path: kubernetes/deployments
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

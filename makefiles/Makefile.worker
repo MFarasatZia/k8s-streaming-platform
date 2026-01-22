@@ -1,0 +1,128 @@
+# =========================
+# AWS / ECR CONFIG
+# =========================
+ECR_REGISTRY   ?= 794272871374.dkr.ecr.eu-north-1.amazonaws.com
+ECR_REPOSITORY ?= semper-stream-worker
+ECR_REGION     ?= eu-north-1
+
+APP_URL ?= https://dev-app.semperstream.io
+API_URL ?= https://dev-api.semperstream.io
+
+# =========================
+# TAGGING
+# =========================
+IMAGE_TAG  ?= latest
+SHORT_SHA  ?= $(shell git rev-parse --short=8 HEAD)
+
+CPU_TAG_LATEST := $(ECR_REGISTRY)/$(ECR_REPOSITORY):$(IMAGE_TAG)
+CPU_TAG_SHA    := $(ECR_REGISTRY)/$(ECR_REPOSITORY):$(IMAGE_TAG)-$(SHORT_SHA)
+
+# =========================
+# DOCKER CONFIG
+# =========================
+BUILDER_NAME ?= semper
+PLATFORM     ?= linux/amd64
+
+DOCKERFILE_CPU      ?= docker/Dockerfile
+
+# =========================
+# CACHING
+# =========================
+# Local cache (optional)
+LOCAL_CACHE_DIR ?= .docker-cache
+LOCAL_CACHE_FROM = --cache-from type=local,src=$(LOCAL_CACHE_DIR)
+LOCAL_CACHE_TO   = --cache-to type=local,dest=$(LOCAL_CACHE_DIR),mode=max
+
+# Registry cache (recommended, works across machines)
+CACHE_REF_CPU ?= $(ECR_REGISTRY)/$(ECR_REPOSITORY):buildcache
+
+REG_CACHE_FROM_CPU  = --cache-from type=registry,ref=$(CACHE_REF_CPU)
+REG_CACHE_TO_CPU    = --cache-to type=registry,ref=$(CACHE_REF_CPU),mode=max
+
+# Choose cache mode: registry (default) or local
+CACHE_MODE ?= registry
+
+ifeq ($(CACHE_MODE),local)
+  CACHE_CPU_FROM  = $(LOCAL_CACHE_FROM)
+  CACHE_CPU_TO    = $(LOCAL_CACHE_TO)
+else
+  CACHE_CPU_FROM  = $(REG_CACHE_FROM_CPU)
+  CACHE_CPU_TO    = $(REG_CACHE_TO_CPU)
+endif
+
+# =========================
+# DEFAULT
+# =========================
+all: push
+
+# =========================
+# PREP
+# =========================
+cache-dir:
+	@mkdir -p $(LOCAL_CACHE_DIR)
+
+ecr-login:
+	@aws ecr get-login-password --region $(ECR_REGION) | \
+	docker login --username AWS --password-stdin $(ECR_REGISTRY)
+
+# Create builder if missing, ensure it's bootstrapped (stable on Docker Desktop)
+buildx-init:
+	@docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 || \
+		(docker buildx create --name $(BUILDER_NAME) --use --driver docker-container --driver-opt network=bridge)
+	@docker buildx inspect --bootstrap $(BUILDER_NAME) >/dev/null
+
+info:
+	@echo "ECR Registry:     $(ECR_REGISTRY)"
+	@echo "ECR Repository:   $(ECR_REPOSITORY)"
+	@echo "ECR Region:       $(ECR_REGION)"
+	@echo "Platform:         $(PLATFORM)"
+	@echo "Cache Mode:       $(CACHE_MODE)"
+	@echo "CPU tags:         $(CPU_TAG_LATEST), $(CPU_TAG_SHA)"
+	@echo "Builder:          $(BUILDER_NAME)"
+
+# =========================
+# CPU: BUILD / PUSH
+# =========================
+build: buildx-init cache-dir
+	docker buildx build --platform $(PLATFORM) \
+		$(CACHE_CPU_FROM) $(CACHE_CPU_TO) \
+		--build-arg APP_URL=$(APP_URL) \
+		--build-arg API_URL=$(API_URL) \
+		--load \
+		-t $(CPU_TAG_LATEST) \
+		-t $(CPU_TAG_SHA) \
+		-f $(DOCKERFILE_CPU) .
+
+push: buildx-init cache-dir ecr-login
+	docker buildx build --platform $(PLATFORM) \
+		$(CACHE_CPU_FROM) $(CACHE_CPU_TO) \
+		--build-arg APP_URL=$(APP_URL) \
+		--build-arg API_URL=$(API_URL) \
+		--push \
+		-t $(CPU_TAG_LATEST) \
+		-t $(CPU_TAG_SHA) \
+		-f $(DOCKERFILE_CPU) .
+
+# =========================
+# DEPLOY
+# =========================
+deploy-worker:
+	kubectl apply -f k8s/dev/deployment-worker.yaml
+	kubectl rollout restart deployment/youtube-stream-worker -n dev
+	kubectl rollout status deployment/youtube-stream-worker -n dev
+
+deploy-all: deploy-worker
+
+# =========================
+# CLEANUP
+# =========================
+prune:
+	docker buildx prune -af
+
+reset-builder:
+	-docker buildx rm $(BUILDER_NAME)
+	-docker rm -f buildx_buildkit_$(BUILDER_NAME)0 2>/dev/null || true
+	@echo "Builder reset. Run 'make buildx-init' next."
+
+.PHONY: all cache-dir ecr-login buildx-init info build push \
+	deploy-worker deploy-all prune reset-builder

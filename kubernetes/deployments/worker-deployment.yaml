@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: youtube-stream-worker
+  namespace: dev
+  labels:
+    app: youtube-stream-worker
+    tier: backend
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: youtube-stream-worker
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: youtube-stream-worker
+        component: worker
+        tier: backend
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry
+      containers:
+        - name: youtube-stream-worker
+          image: 794272871374.dkr.ecr.eu-north-1.amazonaws.com/semper-stream-worker:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 3001
+              name: http
+
+          # Secret reference for environment variables
+          envFrom:
+            - secretRef:
+                name: youtube-stream-worker-secret
+
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKERS_PORT
+              value: "3001"
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "3Gi"
+
+          # TCP health check (no auth required)
+          livenessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3

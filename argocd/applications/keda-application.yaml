@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda-app
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: keda
+    app.kubernetes.io/part-of: streaming-platform
+    environment: dev
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: streaming-platform
+
+  # Source repository - KEDA configurations
+  source:
+    repoURL: https://github.com/yourusername/devops-k8s-streaming-platform.git
+    targetRevision: HEAD
+    path: kubernetes/keda
+
+    directory:
+      recurse: false
+      include: "*.yaml"
+
+  # Destination
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+
+  # Sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m
+
+  revisionHistoryLimit: 5
+
+  # Ignore status fields managed by KEDA operator
+  ignoreDifferences:
+    - group: keda.sh
+      kind: ScaledObject
+      jsonPointers:
+        - /status

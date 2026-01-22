@@ -1,0 +1,25 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+maxPods: 200
+# Optimize for high-spec server (48 cores, 128GB RAM)
+kubeAPIQPS: 100
+kubeAPIBurst: 200
+serializeImagePulls: false
+# Enable GPU support
+featureGates:
+  DevicePlugins: true
+# Resource reservation for system (reserve 4GB RAM, 2 cores for system)
+systemReserved:
+  cpu: "2000m"
+  memory: "4Gi"
+  ephemeral-storage: "10Gi"
+# Resource reservation for k3s components
+kubeReserved:
+  cpu: "1000m"
+  memory: "2Gi"
+  ephemeral-storage: "5Gi"
+# Eviction thresholds
+evictionHard:
+  memory.available: "1Gi"
+  nodefs.available: "10%"
+  imagefs.available: "10%"

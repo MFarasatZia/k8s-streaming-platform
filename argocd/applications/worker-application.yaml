@@ -1,0 +1,57 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: worker-app
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/part-of: streaming-platform
+    environment: dev
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: streaming-platform
+
+  # Source repository
+  source:
+    repoURL: https://github.com/yourusername/devops-k8s-streaming-platform.git
+    targetRevision: HEAD
+    path: kubernetes/deployments
+
+    directory:
+      recurse: false
+      include: "worker-*.yaml"
+
+  # Destination
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+
+  # Sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  # Ignore KEDA-managed replica count
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

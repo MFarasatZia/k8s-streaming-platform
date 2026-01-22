@@ -1,0 +1,29 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: youtube-stream-worker-ingress
+  namespace: dev
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    traefik.ingress.kubernetes.io/router.entrypoints: "web,websecure"
+    traefik.ingress.kubernetes.io/redirect-scheme: "https"
+    traefik.ingress.kubernetes.io/redirect-permanent: "true"
+
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: dev-worker.semperstream.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: youtube-stream-worker
+            port:
+              number: 3001
+
+  tls:
+  - hosts:
+    - dev-worker.semperstream.io
+    secretName: dev-worker-tls-secret

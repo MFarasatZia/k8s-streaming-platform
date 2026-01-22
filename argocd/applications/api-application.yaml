@@ -1,0 +1,71 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-app
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/part-of: streaming-platform
+    environment: dev
+  # Finalizer ensures proper cleanup
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Notifications - uncomment if using argocd-notifications
+    # notifications.argoproj.io/subscribe.on-sync-succeeded.slack: deployments
+    # notifications.argoproj.io/subscribe.on-sync-failed.slack: deployments
+spec:
+  project: streaming-platform
+
+  # Source repository
+  source:
+    repoURL: https://github.com/yourusername/devops-k8s-streaming-platform.git
+    targetRevision: HEAD  # or specific branch: main, develop
+    path: kubernetes/deployments
+
+    # Directory-specific settings
+    directory:
+      recurse: false
+      include: "api-*.yaml"
+
+  # Destination cluster and namespace
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+
+  # Sync policy - automated GitOps
+  syncPolicy:
+    automated:
+      prune: true           # Delete resources not in Git
+      selfHeal: true        # Revert manual changes
+      allowEmpty: false     # Don't sync if no resources
+
+    # Sync options
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - Validate=true
+
+    # Retry policy for failed syncs
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  # Health checks and status
+  revisionHistoryLimit: 10
+
+  # Ignore differences in certain fields (useful for auto-generated fields)
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas  # Ignore replica count (managed by KEDA)
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data  # Ignore secret data changes

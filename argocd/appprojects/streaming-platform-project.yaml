@@ -1,0 +1,114 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: streaming-platform
+  namespace: argocd
+  # Finalizer to prevent accidental deletion
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: "Streaming Platform - Microservices Application"
+
+  # Source repositories allowed for this project
+  sourceRepos:
+    - "https://github.com/yourusername/devops-k8s-streaming-platform.git"
+    - "https://github.com/yourusername/*"  # Allow all repos under your account
+
+  # Destination clusters and namespaces
+  destinations:
+    - namespace: dev
+      server: https://kubernetes.default.svc
+    - namespace: staging
+      server: https://kubernetes.default.svc
+    - namespace: production
+      server: https://kubernetes.default.svc
+    # Allow keda namespace for ScaledObjects
+    - namespace: keda
+      server: https://kubernetes.default.svc
+
+  # Cluster resource whitelist - what cluster-scoped resources can be deployed
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRole
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRoleBinding
+
+  # Namespace resource blacklist - what cannot be deployed in namespaces
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+
+  # Namespace resource whitelist - explicitly allow these resources
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: "apps"
+      kind: "*"
+    - group: "networking.k8s.io"
+      kind: "*"
+    - group: "keda.sh"
+      kind: "*"
+    - group: "monitoring.coreos.com"
+      kind: "*"
+
+  # Roles for fine-grained access control
+  roles:
+    # Developer role - can sync and view applications
+    - name: developer
+      description: "Developer access - can sync applications"
+      policies:
+        - p, proj:streaming-platform:developer, applications, get, streaming-platform/*, allow
+        - p, proj:streaming-platform:developer, applications, sync, streaming-platform/*, allow
+        - p, proj:streaming-platform:developer, applications, action/*, streaming-platform/*, allow
+      groups:
+        - developers
+
+    # Admin role - full access to project
+    - name: admin
+      description: "Admin access - full control"
+      policies:
+        - p, proj:streaming-platform:admin, applications, *, streaming-platform/*, allow
+        - p, proj:streaming-platform:admin, repositories, *, streaming-platform/*, allow
+      groups:
+        - admins
+
+    # Read-only role - can only view
+    - name: readonly
+      description: "Read-only access"
+      policies:
+        - p, proj:streaming-platform:readonly, applications, get, streaming-platform/*, allow
+      groups:
+        - viewers
+
+  # Sync windows - control when syncs can happen
+  syncWindows:
+    # Allow syncs during business hours (UTC)
+    - kind: allow
+      schedule: "0 8 * * 1-5"  # 8 AM UTC, Mon-Fri
+      duration: 10h
+      applications:
+        - "*"
+      namespaces:
+        - dev
+        - staging
+
+    # Deny syncs to production during weekends
+    - kind: deny
+      schedule: "0 0 * * 0,6"  # Midnight Saturday and Sunday
+      duration: 48h
+      applications:
+        - "*-prod"
+      namespaces:
+        - production
+
+  # Orphaned resources monitoring
+  orphanedResources:
+    warn: true
+    ignore:
+      - group: ""
+        kind: ConfigMap
+        name: kube-root-ca.crt

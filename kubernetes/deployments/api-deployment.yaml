@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: youtubr-api-cpu
+  namespace: dev
+  labels:
+    app: youtubr-api
+    component: cpu-worker
+    tier: backend
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: youtubr-api
+      component: cpu-worker
+  template:
+    metadata:
+      labels:
+        app: youtubr-api
+        component: cpu-worker
+        tier: backend
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry
+
+      securityContext:
+        fsGroup: 1001
+
+      # Node affinity to prefer non-GPU nodes for cost optimization
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: gpu
+                    operator: DoesNotExist
+
+      containers:
+        - name: youtubr-api
+          image: 794272871374.dkr.ecr.eu-north-1.amazonaws.com/semper-stream-api:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 3010
+
+          envFrom:
+            - secretRef:
+                name: youtubr-api-secret
+
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3010
+            initialDelaySeconds: 40
+            periodSeconds: 30
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3010
+            initialDelaySeconds: 20
+            periodSeconds: 10
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: uploads
+              mountPath: /app/uploads
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: uploads
+          emptyDir: {}

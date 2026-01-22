@@ -1,0 +1,61 @@
+name: Build and Deploy API
+
+on:
+  push:
+    branches:
+      - devops
+  workflow_dispatch:
+
+env:
+  APP_URL: https://dev-app.semperstream.io
+  WORKERS_API_URL: https://dev-worker.semperstream.io
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    environment: Dev Secrets
+     # Use the GitHub environment where your variables are stored
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.ECR_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Build and Push API Image
+        run: make push
+        env:
+          CACHE_MODE: registry
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > kubeconfig.yaml
+          chmod 600 kubeconfig.yaml
+          echo "KUBECONFIG=$PWD/kubeconfig.yaml" >> $GITHUB_ENV
+
+      - name: Test cluster access
+        run: kubectl get nodes
+
+      - name: Deploy API
+        run: make deploy
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ API Image: ${{ vars.ECR_REPOSITORY_API }}/${{ vars.ECR_REPOSITORY }}:latest"
+          echo "✅ API deployment rolled out"
+          echo "Deployment completed successfully!"

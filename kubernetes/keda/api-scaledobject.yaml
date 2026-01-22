@@ -1,0 +1,75 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: youtubr-api-scaledobject
+  namespace: dev
+  labels:
+    app: youtubr-api
+spec:
+  # Target deployment to scale
+  scaleTargetRef:
+    name: youtubr-api-cpu
+
+  # Scaling boundaries
+  minReplicaCount: 1
+  maxReplicaCount: 5
+
+  # Cooldown periods (in seconds)
+  cooldownPeriod: 300          # Wait 5 min before scaling down
+  pollingInterval: 15          # Check metrics every 15 seconds
+
+  # Advanced scaling behavior
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+
+  # Scaling triggers - KEDA will scale based on these metrics
+  triggers:
+    # Trigger 1: HTTP Requests per Second (Primary)
+    # Scale when RPS > 50 per pod
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-server:9090
+        metricName: http_requests_per_second
+        query: |
+          sum(rate(youtubr_api_http_requests_total{service="youtubr-api"}[2m]))
+        threshold: "50"
+        activationThreshold: "5"  # Don't scale if total RPS < 5
+
+    # Trigger 2: Response Time (Latency-based scaling)
+    # Scale when p95 latency > 500ms
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-server:9090
+        metricName: http_request_latency_p95
+        query: |
+          histogram_quantile(0.95, sum(rate(youtubr_api_http_request_duration_seconds_bucket{service="youtubr-api"}[2m])) by (le))
+        threshold: "0.5"  # 500ms
+
+    # Trigger 3: Active Streams Count
+    # Scale when active streams > 10 per pod
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-server:9090
+        metricName: active_streams_count
+        query: |
+          youtubr_api_streams_active_total
+        threshold: "10"
+
+    # Trigger 4: CPU as fallback (lower priority)
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "80"

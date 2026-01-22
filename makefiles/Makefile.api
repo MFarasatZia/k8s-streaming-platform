@@ -1,0 +1,47 @@
+ECR_REGISTRY ?= 794272871374.dkr.ecr.eu-north-1.amazonaws.com
+ECR_REPOSITORY ?= semper-stream-api
+ECR_REGION ?= eu-north-1
+
+IMAGE_TAG ?= latest
+SHORT_SHA ?= $(shell git rev-parse --short=8 HEAD)
+
+ECR_IMAGE = $(ECR_REGISTRY)/$(ECR_REPOSITORY)
+
+DOCKERFILE_API = docker/Dockerfile.api
+
+.PHONY: login build push deploy rollout
+
+login:
+	aws ecr get-login-password --region $(ECR_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+
+# Build API image locally (for testing)
+build:
+	docker buildx build --platform linux/amd64 \
+		--build-arg APP_URL=https://dev-app.semperstream.io \
+		--build-arg WORKERS_API_URL=https://dev-worker.semperstream.io \
+		-t $(ECR_IMAGE):$(IMAGE_TAG) \
+		-t $(ECR_IMAGE):$(IMAGE_TAG)-$(SHORT_SHA) \
+		-f $(DOCKERFILE_API) .
+
+
+# Build & push API image to ECR
+push: login
+	docker buildx build --platform linux/amd64 \
+		--build-arg APP_URL=https://dev-app.semperstream.io \
+		--build-arg WORKERS_API_URL=https://dev-worker.semperstream.io \
+		-t $(ECR_IMAGE):$(IMAGE_TAG) \
+		-t $(ECR_IMAGE):$(IMAGE_TAG)-$(SHORT_SHA) \
+		--push \
+		-f $(DOCKERFILE_API) .
+
+
+# Deploy to Kubernetes
+deploy:
+	kubectl apply -f k8s/dev/deployment-cpu.yaml
+	kubectl rollout restart deployment/youtubr-api-cpu -n dev
+	kubectl rollout status deployment/youtubr-api-cpu -n dev
+
+# Rollout restart deployment
+rollout:
+	kubectl rollout restart deployment/youtubr-api-cpu -n dev
+	kubectl rollout status deployment/youtubr-api-cpu -n dev

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: youtubr-api-cpu-service
+  namespace: dev
+  labels:
+    app: youtubr-api
+    component: cpu-worker
+spec:
+  type: ClusterIP
+  selector:
+    app: youtubr-api
+    component: cpu-worker
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3010
+    protocol: TCP
+  sessionAffinity: None

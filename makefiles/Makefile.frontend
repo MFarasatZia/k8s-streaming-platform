@@ -1,0 +1,63 @@
+# ===== Frontend Makefile (build + push + deploy to EKS) =====
+
+# ---- AWS ECR ----
+AWS_ACCOUNT_ID = 794272871374
+AWS_REGION     = eu-north-1
+ECR_REGISTRY   = $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+ECR_REPO       = $(ECR_REGISTRY)/automation-frontend
+IMAGE_NAME     := $(ECR_REPO)
+
+# ---- Tag & Env ----
+COMMIT_ID := $(shell git rev-parse --short HEAD)
+IMAGE_TAG ?= latest
+
+# ---- K8s ----
+K8S_NAMESPACE   ?= dev
+DEPLOYMENT_NAME ?= youtube-frontend
+CONTAINER       ?= youtube-frontend
+
+# ---- Vite Env (DEV) ----
+VITE_API_URL    ?= https://dev-api.semperstream.io
+VITE_WORKERS_API_URL ?= https://dev-worker.semperstream.io
+VITE_DISCORD_URL     ?= https://discord.gg/6MCHZxFt
+VITE_HOW_TO_GUIDE    ?= https://discord.gg/6MCHZxFt
+VITE_AFFILIATE_URL   ?= https://semperstream.firstpromoter.com
+VITE_LANDING_URL     ?= https://home.semperstream.io
+VITE_AMAZON_BASE_URL ?= https://dev-semper.s3.eu-north-1.amazonaws.com
+
+# ---- Default ----
+release-all: login-ecr build-front push-front
+
+# ---- Login ECR ----
+login-ecr:
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_REGISTRY)
+
+# ---- Build (React) ----
+build-front:
+	docker buildx build --platform linux/amd64 \
+		-t $(IMAGE_NAME):$(IMAGE_TAG) \
+		-t $(IMAGE_NAME):$(COMMIT_ID) \
+		-f docker/Dockerfile-react \
+		--build-arg VITE_API_URL=$(VITE_API_URL) \
+		--build-arg VITE_WORKERS_API_URL=$(VITE_WORKERS_API_URL) \
+		--build-arg VITE_DISCORD_URL=$(VITE_DISCORD_URL) \
+		--build-arg VITE_HOW_TO_GUIDE=$(VITE_HOW_TO_GUIDE) \
+		--build-arg VITE_AFFILIATE_URL=$(VITE_AFFILIATE_URL) \
+		--build-arg VITE_LANDING_URL=$(VITE_LANDING_URL) \
+		--build-arg VITE_AMAZON_BASE_URL=$(VITE_AMAZON_BASE_URL) \
+		--load .
+
+# ---- Push ----
+push-front:
+	docker push $(IMAGE_NAME):$(IMAGE_TAG)
+	docker push $(IMAGE_NAME):$(COMMIT_ID)
+
+# ---- Deploy (image update via manifest) ----
+deploy:
+	kubectl -n $(K8S_NAMESPACE) set image deployment/$(DEPLOYMENT_NAME) \
+	  $(CONTAINER)=$(IMAGE_NAME):$(IMAGE_TAG)
+	kubectl -n $(K8S_NAMESPACE) rollout status deployment/$(DEPLOYMENT_NAME)
+
+
+# ---- Handy combo ----
+ship: release-all deploy
